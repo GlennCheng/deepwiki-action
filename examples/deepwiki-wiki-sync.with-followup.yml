@@ -1,0 +1,44 @@
+# Optional variant of deepwiki-wiki-sync.yml that also runs after merges.
+#
+# If a PR is merged before its update finished, the run after the merge
+# opens (or refreshes) a follow-up PR straight into the target branch.
+# Requires "Allow GitHub Actions to create and approve pull requests" in
+# Settings -> Actions -> General -> Workflow permissions.
+#
+# Use it only when feature branches merge straight into the target branch.
+# Do NOT use it with a develop -> main release flow: the follow-up PR would
+# bypass develop, so main and develop would diverge and conflict.
+name: DeepWiki wiki.json sync
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+  push:
+    branches: [main]          # keep in step with the list above
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  # One run per pull request (or per branch for pushes); a newer push
+  # cancels the older run so they never race to commit.
+  group: deepwiki-wiki-sync-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: GlennCheng/deepwiki-action@v1
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Needed only if the target branch has required status checks:
+          # pushes with the default GITHUB_TOKEN do not trigger other workflows.
+          # push-token: ${{ secrets.DEEPWIKI_SYNC_TOKEN }}
+          # language: 繁體中文
+          # max-pages: "30"

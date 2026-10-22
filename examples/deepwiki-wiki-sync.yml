@@ -1,0 +1,38 @@
+# Copy to .github/workflows/deepwiki-wiki-sync.yml in the repository whose
+# DeepWiki you want to keep in sync. Change the branch list to your targets.
+#
+# Runs only on pull requests into the target branch: the update is committed
+# onto the PR's source branch and merges together with the PR. For a
+# develop -> main release flow, keep the target as main; the update is then
+# committed onto develop by the release PR.
+name: DeepWiki wiki.json sync
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  # One run per pull request; a newer push cancels the older run so they
+  # never race to commit.
+  group: deepwiki-wiki-sync-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: GlennCheng/deepwiki-action@v1
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Needed only if the target branch has required status checks:
+          # pushes with the default GITHUB_TOKEN do not trigger other workflows.
+          # push-token: ${{ secrets.DEEPWIKI_SYNC_TOKEN }}
+          # language: 繁體中文
+          # max-pages: "30"

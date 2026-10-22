@@ -1,0 +1,174 @@
+name: DeepWiki wiki.json sync
+description: >
+  Keeps .devin/wiki.json in sync with the repository structure. On a pull
+  request it commits the update onto the PR branch; after a push to the target
+  branch it opens a follow-up pull request if the file is still out of date.
+branding:
+  icon: book-open
+  color: blue
+
+inputs:
+  anthropic-api-key:
+    description: Anthropic API key used to plan the wiki pages.
+    required: true
+  github-token:
+    description: Token for checkout, pushes, and pull requests.
+    default: ${{ github.token }}
+  push-token:
+    description: >
+      Optional PAT or GitHub App token used for checkout and pushes instead of
+      github-token. Pushes made with the default GITHUB_TOKEN do not trigger
+      other workflows, so set this if the target branch has required checks.
+    default: ""
+  model:
+    description: Claude model ID.
+    default: claude-opus-5-5
+  effort:
+    description: Claude effort level (low, medium, high, xhigh, max).
+    default: medium
+  max-pages:
+    description: DeepWiki page limit (30, or 80 on enterprise plans).
+    default: "30"
+  language:
+    description: Language for page titles and purposes.
+    default: English
+  depth:
+    description: Directory depth that counts as a structural change.
+    default: "3"
+  extra-context:
+    description: Comma-separated glob patterns of extra files to show Claude (e.g. "docs/*.md").
+    default: ""
+  sync-branch:
+    description: Branch used for follow-up pull requests. Defaults to deepwiki-wiki-sync/<target branch>.
+    default: ""
+
+outputs:
+  stale:
+    description: Whether wiki.json was out of date when the run started.
+    value: ${{ steps.check.outputs.stale }}
+  changed:
+    description: Whether a new wiki.json was written.
+    value: ${{ steps.generate.outputs.changed }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve mode
+      id: mode
+      shell: bash
+      env:
+        EVENT: ${{ github.event_name }}
+        HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        BASE_REF: ${{ github.event.pull_request.base.ref }}
+        REPO: ${{ github.repository }}
+        REF_NAME: ${{ github.ref_name }}
+        SYNC_BRANCH: ${{ inputs.sync-branch }}
+      run: |
+        case "$EVENT" in
+          pull_request)
+            if [ "$HEAD_REPO" != "$REPO" ]; then
+              echo "::notice::Pull request from a fork; skipping (no secrets or push access)."
+              echo "mode=skip" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+            target="$BASE_REF"
+            if [ "$HEAD_REF" = "${SYNC_BRANCH:-deepwiki-wiki-sync/$target}" ]; then
+              echo "::notice::This is the follow-up pull request itself; nothing to do."
+              echo "mode=skip" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+            echo "mode=pr" >> "$GITHUB_OUTPUT"
+            echo "ref=$HEAD_REF" >> "$GITHUB_OUTPUT"
+            echo "target=$target" >> "$GITHUB_OUTPUT" ;;
+          push|workflow_dispatch|schedule)
+            echo "mode=push" >> "$GITHUB_OUTPUT"
+            echo "ref=$REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "target=$REF_NAME" >> "$GITHUB_OUTPUT" ;;
+          *)
+            echo "::warning::Unsupported event '$EVENT'; skipping."
+            echo "mode=skip" >> "$GITHUB_OUTPUT" ;;
+        esac
+        echo "sync_branch=${SYNC_BRANCH:-deepwiki-wiki-sync/${target:-$REF_NAME}}" >> "$GITHUB_OUTPUT"
+
+    - name: Check out
+      if: steps.mode.outputs.mode != 'skip'
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ steps.mode.outputs.ref }}
+        token: ${{ inputs.push-token != '' && inputs.push-token || inputs.github-token }}
+
+    - name: Set up Python
+      if: steps.mode.outputs.mode != 'skip'
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Check whether wiki.json is stale
+      id: check
+      if: steps.mode.outputs.mode != 'skip'
+      shell: bash
+      env:
+        WIKI_SYNC_MAX_PAGES: ${{ inputs.max-pages }}
+        WIKI_SYNC_LANGUAGE: ${{ inputs.language }}
+        WIKI_SYNC_DEPTH: ${{ inputs.depth }}
+        WIKI_SYNC_EXTRA_CONTEXT: ${{ inputs.extra-context }}
+      run: python3 "$GITHUB_ACTION_PATH/src/wiki_sync.py" check
+
+    - name: Skip if the follow-up pull request is already current
+      id: followup
+      if: steps.mode.outputs.mode == 'push' && steps.check.outputs.stale == 'true'
+      shell: bash
+      env:
+        SYNC_BRANCH: ${{ steps.mode.outputs.sync_branch }}
+        SIGNATURE: ${{ steps.check.outputs.signature }}
+      run: |
+        current=""
+        if git fetch --depth 1 origin "refs/heads/$SYNC_BRANCH" 2>/dev/null; then
+          current="$(git show FETCH_HEAD:.devin/wiki-sync.lock.json 2>/dev/null \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("inputs_sha256",""))' || true)"
+        fi
+        if [ -n "$current" ] && [ "$current" = "$SIGNATURE" ]; then
+          echo "Branch $SYNC_BRANCH already holds an update for this structure; not regenerating."
+          echo "current=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "current=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Install the Anthropic SDK
+      if: steps.check.outputs.stale == 'true' && steps.followup.outputs.current != 'true'
+      shell: bash
+      run: python3 -m pip install --quiet "anthropic==1.14.0"
+
+    - name: Generate wiki.json
+      id: generate
+      if: steps.check.outputs.stale == 'true' && steps.followup.outputs.current != 'true'
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        WIKI_SYNC_MODEL: ${{ inputs.model }}
+        WIKI_SYNC_EFFORT: ${{ inputs.effort }}
+        WIKI_SYNC_MAX_PAGES: ${{ inputs.max-pages }}
+        WIKI_SYNC_LANGUAGE: ${{ inputs.language }}
+        WIKI_SYNC_DEPTH: ${{ inputs.depth }}
+        WIKI_SYNC_EXTRA_CONTEXT: ${{ inputs.extra-context }}
+      run: |
+        if [ -z "$ANTHROPIC_API_KEY" ]; then
+          echo "::error::anthropic-api-key is empty. Add an ANTHROPIC_API_KEY repository or organization secret."
+          exit 1
+        fi
+        python3 "$GITHUB_ACTION_PATH/src/wiki_sync.py" generate
+
+    - name: Commit to the pull request
+      if: steps.mode.outputs.mode == 'pr' && steps.generate.outputs.changed == 'true'
+      shell: bash
+      env:
+        HEAD_REF: ${{ steps.mode.outputs.ref }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/commit_to_pr.sh"
+
+    - name: Open a follow-up pull request
+      if: steps.mode.outputs.mode == 'push' && steps.generate.outputs.changed == 'true'
+      shell: bash
+      env:
+        BASE_BRANCH: ${{ steps.mode.outputs.target }}
+        SYNC_BRANCH: ${{ steps.mode.outputs.sync_branch }}
+        GH_TOKEN: ${{ inputs.push-token != '' && inputs.push-token || inputs.github-token }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/open_followup_pr.sh"

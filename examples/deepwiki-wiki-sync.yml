@@ -5,7 +5,7 @@
 # onto the PR's source branch and merges together with the PR. For a
 # develop -> main release flow, keep the target as main; the update is then
 # committed onto develop by the release PR.
-name: DeepWiki wiki.json sync
+name: DeepWiki Page Planner
 
 on:
   pull_request:

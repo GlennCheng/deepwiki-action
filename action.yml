@@ -1,8 +1,5 @@
-name: DeepWiki wiki.json sync
-description: >
-  Keeps .devin/wiki.json in sync with the repository structure. On a pull
-  request it commits the update onto the PR branch; after a push to the target
-  branch it opens a follow-up pull request if the file is still out of date.
+name: DeepWiki Page Planner
+description: Uses Claude to keep DeepWiki's page plan (.devin/wiki.json) in step with your repository structure on every PR.
 branding:
   icon: book-open
   color: blue

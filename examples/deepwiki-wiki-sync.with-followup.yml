@@ -8,7 +8,7 @@
 # Use it only when feature branches merge straight into the target branch.
 # Do NOT use it with a develop -> main release flow: the follow-up PR would
 # bypass develop, so main and develop would diverge and conflict.
-name: DeepWiki wiki.json sync
+name: DeepWiki Page Planner
 
 on:
   pull_request:

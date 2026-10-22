@@ -1,14 +1,28 @@
-# deepwiki-action
+# DeepWiki Page Planner
 
 **English** | [繁體中文](README.zh-TW.md)
 
-A GitHub Action that keeps a repository's `.devin/wiki.json` in step with its code structure.
+A GitHub Action that keeps your [DeepWiki](https://docs.devin.ai/work-with-devin/deepwiki) page plan, `.devin/wiki.json`, in step with your code. When a pull request changes the repository's structure, Claude re-plans the page list and the update is committed onto that same pull request.
+
+```yaml
+- uses: GlennCheng/deepwiki-action@v1
+  with:
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
 
 ## What it does and why
 
-When [DeepWiki](https://docs.devin.ai/work-with-devin/deepwiki) generates a wiki and finds `.devin/wiki.json` at the repository root, it creates **only** the pages listed there. The file is written by hand, so it drifts as the code changes: new modules get no page, and removed features keep theirs.
+When DeepWiki generates a wiki and finds `.devin/wiki.json` at the repository root, it creates **only** the pages listed there. The file is written by hand, so it drifts as the code changes: new modules get no page, and removed features keep theirs.
 
-This Action uses Claude to read the repository structure during pull requests, re-plans the page list, and writes it back to `.devin/wiki.json`.
+This Action reads the repository structure during pull requests, asks Claude to re-plan the page list, and writes it back to `.devin/wiki.json`.
+
+- **Pays only for real changes.** A structure signature skips the API call when nothing structural changed, which covers most feature PRs.
+- **Lands with your PR.** The update is committed onto the PR's source branch and merges with it; no extra PRs by default.
+- **Keeps your hand edits.** `repo_notes` and pages you pin with `page_notes` are kept exactly as written.
+- **Checks before it writes.** Every plan is checked against DeepWiki's documented limits; a plan that fails twice writes nothing.
+- **Works with release flows.** For develop → main, the update rides along on the release PR.
+
+> This is an independent project. It is not affiliated with or endorsed by Cognition, Devin, or DeepWiki.
 
 ## How it works
 
@@ -34,7 +48,7 @@ Do every step below in the **repository you want to cover**, not in this Action'
 
 | Requirement | How to check |
 |---|---|
-| The repository can use this Action | If this Action's repository is private, only repositories with the **same owner** (the same user or organization) can use it (see the first row of "Troubleshooting"). |
+| The repository can use this Action | Any repository can use it while this Action's repository is public. If you use a private copy, only repositories with the **same owner** (the same user or organization) can use it (see the first row of "Troubleshooting"). |
 | You have **Admin** permission on it | Open the repository page; the tab bar at the top must show **⚙ Settings** on the far right. If it does not, ask a repository admin to grant access or to do step 1 for you. |
 | You have an Anthropic API key | See step 0. |
 | You know the target branch | The branch PRs merge into, usually `main`, sometimes `master`. Check the branch drop-down at the top left of the repository page.<br>**For a flow where features go into develop and a release PR merges develop into main, use `main` as the target**: the Action runs on the release PR and commits the update onto develop, which then goes into main with the release. |
@@ -45,8 +59,8 @@ Do every step below in the **repository you want to cover**, not in this Action'
 
 The Action uses this key to call Claude; usage is billed to the Anthropic account that owns it.
 
-1. First ask whoever manages your team's Anthropic account whether a key for CI already exists. If so, use it and skip to step 1.
-2. To create one yourself, sign in to the [Claude Console](https://console.anthropic.com/) in a browser.
+1. If you already have a key set aside for CI, you can use it and skip to step 1.
+2. Otherwise, sign in to the [Claude Console](https://console.anthropic.com/) in a browser.
 3. Open the **API keys** page and click **Create Key**.
 4. Give it a recognizable name, such as `github-deepwiki-sync`, and create it.
 5. **Copy the key right away** (it starts with `sk-ant-`). Once you close that screen, the full key is not shown again.
@@ -88,7 +102,7 @@ The workflow file tells GitHub when to run which Action. It must live in the rep
 **Prepare the content** (change `main` to your target branch; you can list several, such as `[main, release]`):
 
 ```yaml
-name: DeepWiki wiki.json sync
+name: DeepWiki Page Planner
 
 on:
   pull_request:
@@ -113,6 +127,7 @@ jobs:
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           # language: English      ← remove the leading # to set the page language
+          # max-pages: "30"        ← page limit, 30 by default; up to 80 on DeepWiki enterprise plans
 ```
 
 The same file is in [`examples/deepwiki-wiki-sync.yml`](examples/deepwiki-wiki-sync.yml).
@@ -135,7 +150,7 @@ What each part does:
 4. Paste the content into the editor.
 5. Click the green **Commit changes...** button at the top right.
 6. In the dialog:
-   - set **Commit message** to something like `ci: add DeepWiki wiki.json sync`;
+   - set **Commit message** to something like `ci: add DeepWiki Page Planner`;
    - choose **Create a new branch for this commit and start a pull request** (the only choice if the branch is protected, and easier to review);
    - click **Propose changes**.
 7. On the "Open a pull request" page, check the base branch and click **Create pull request**.
@@ -149,7 +164,7 @@ git checkout -b ci/deepwiki-wiki-sync
 mkdir -p .github/workflows
 # save the content above as .github/workflows/deepwiki-wiki-sync.yml
 git add .github/workflows/deepwiki-wiki-sync.yml
-git commit -m "ci: add DeepWiki wiki.json sync"
+git commit -m "ci: add DeepWiki Page Planner"
 git push -u origin ci/deepwiki-wiki-sync
 gh pr create --base main --fill       # use --base develop for a develop -> main flow
 ```
@@ -165,7 +180,7 @@ The first run happens on the **first PR into the target branch**:
 
 If the repository has no `.devin/wiki.json` yet, the first run creates the first version.
 
-1. In the checks box at the bottom of the PR page, **DeepWiki wiki.json sync / sync (pull_request)** shows as running (yellow dot). It usually finishes in 1–3 minutes.
+1. In the checks box at the bottom of the PR page, **DeepWiki Page Planner / sync (pull_request)** shows as running (yellow dot). It usually finishes in 1–3 minutes.
 2. To watch it, click **Details** next to it and expand the steps under **Run GlennCheng/deepwiki-action@v1**. A successful run prints something like:
 
    ```
@@ -196,7 +211,7 @@ DeepWiki reads `.devin/wiki.json` **when it generates the wiki**. Its documentat
 2. Open this repository's wiki page and regenerate it.
 3. When it finishes, the wiki's page list should match `.devin/wiki.json`.
 
-> The documentation does not say exactly where the regenerate control is. If you cannot find it, ask whoever manages the Devin account.
+> The documentation does not say exactly where the regenerate control is. If you cannot find it, check the DeepWiki documentation or ask your Devin workspace admin.
 
 ---
 
@@ -293,7 +308,7 @@ The Action keeps pinned pages **exactly as they are** every time it re-plans; Cl
 
 **Don't pin too much:** the more pages you pin, the fewer Claude can plan. When pins fill the limit, a new module has no room, the plan is sent back, and the job fails. Pin only pages that really need a particular treatment.
 
-**Listing pinned pages:** run this locally (after the setup under "Maintaining this Action"):
+**Listing pinned pages:** run this locally (after the setup under "Development"):
 
 ```bash
 python3 -c "import json,sys; sys.path.insert(0,'src'); import wiki_sync as w; \
@@ -370,7 +385,7 @@ The full file is in [`examples/deepwiki-wiki-sync.with-followup.yml`](examples/d
 - The Action runs once more after each merge into the target branch. If the structure signature matches, it stops without calling the API; only if the file is still stale does it re-plan and open a follow-up PR.
 - Follow-up PRs use a fixed branch (by default `deepwiki-wiki-sync/<target branch>`; change it with `sync-branch`). Only one follow-up PR is open at a time; later updates are added to the same PR instead of opening new ones.
 - The follow-up PR itself does not trigger the Action, and the run after it merges finds a matching signature, so nothing loops.
-- You can also run it by hand: **Actions → DeepWiki wiki.json sync → Run workflow**, then pick a branch. If the file is stale, it opens a follow-up PR.
+- You can also run it by hand: **Actions → DeepWiki Page Planner → Run workflow**, then pick a branch. If the file is stale, it opens a follow-up PR.
 
 ---
 
@@ -382,7 +397,7 @@ Set these under `with:` in the workflow.
 |---|---|---|
 | `anthropic-api-key` | (required) | Anthropic API key |
 | `language` | `English` | Language for page titles and purposes, e.g. `繁體中文` |
-| `max-pages` | `30` | Page limit; `80` on DeepWiki enterprise plans |
+| `max-pages` | `30` | Page limit, pinned pages included. Set it lower than 30 for a more compact wiki; DeepWiki allows at most 30, or `80` on enterprise plans |
 | `depth` | `3` | How deep a directory change counts as structural |
 | `extra-context` | empty | Extra files for Claude to read, as comma-separated globs, e.g. `docs/*.md,src/*/index.ts` |
 | `model` | `claude-opus-5-5` | Claude model |
@@ -429,7 +444,7 @@ Pushes then trigger CI as usual. The Action runs once more as well, but the stru
 
 ## Cost and data
 
-- **The API is called only on structural changes.** Ordinary feature PRs cost nothing.
+- **The API is called only on structural changes.** Ordinary feature PRs make no API call. Each run still uses a little GitHub Actions time for checkout and the check itself.
 - Each call sends: tracked file paths (up to 3,000), the directory list, the contents of up to 40 key files (up to 8,000 characters each), and the current wiki.json. **It does not send ordinary source files** unless you list them in `extra-context`.
 - Cost per call depends on repository size: a few cents for a small repository, and usually under US$1 for a large one (estimated from Claude Opus 5.5 pricing, not measured).
 - Before writing, the plan is checked against DeepWiki's limits: at least 1 page, at most `max-pages` pages, no empty or duplicate titles, parents that exist and do not form a cycle, at most 100 notes in total, and at most 10,000 characters per note.
@@ -440,7 +455,9 @@ Delete `.github/workflows/deepwiki-wiki-sync.yml`. The existing `.devin/wiki.jso
 
 ---
 
-## Maintaining this Action
+## Development
+
+The Action is a composite action: `action.yml` wires the steps, `src/wiki_sync.py` does the planning and validation, and `scripts/` holds the git steps. To work on it:
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install anthropic==1.14.0 pytest
@@ -455,3 +472,7 @@ ANTHROPIC_API_KEY=... .venv/bin/python src/wiki_sync.py generate --repo /path/to
 **Releasing:** tag `v1.x.y`, then move `v1` to the same commit. Use `v2` for breaking changes.
 
 **When you change the prompt or output rules,** bump `GENERATOR_VERSION` in `src/wiki_sync.py` so every repository re-plans on its next run.
+
+## License
+
+[MIT](LICENSE)

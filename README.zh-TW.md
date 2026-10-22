@@ -1,14 +1,28 @@
-# deepwiki-action
+# DeepWiki Page Planner
 
 [English](README.md) | **繁體中文**
 
-讓 repo 的 `.devin/wiki.json` 自動跟著程式碼結構更新的 GitHub Action。
+讓 [DeepWiki](https://docs.devin.ai/work-with-devin/deepwiki) 的頁面規劃檔 `.devin/wiki.json` 自動跟著程式碼更新的 GitHub Action。PR 改到 repo 結構時，由 Claude 重新規劃頁面清單，並把更新 commit 到同一個 PR。
+
+```yaml
+- uses: GlennCheng/deepwiki-action@v1
+  with:
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
 
 ## 這是什麼、為什麼需要
 
-[DeepWiki](https://docs.devin.ai/work-with-devin/deepwiki) 產生 wiki 時，如果 repo 根目錄有 `.devin/wiki.json`，就**只會**產生裡面列出的頁面。這份檔案是手寫的，程式碼一改就容易過時：新模組沒有頁面、刪掉的功能還留著。
+DeepWiki 產生 wiki 時，如果 repo 根目錄有 `.devin/wiki.json`，就**只會**產生裡面列出的頁面。這份檔案是手寫的，程式碼一改就容易過時：新模組沒有頁面、刪掉的功能還留著。
 
-這個 Action 在 PR 階段用 Claude 分析 repo 結構，重新規劃頁面清單，並寫回 `.devin/wiki.json`。
+這個 Action 在 PR 階段讀取 repo 結構，請 Claude 重新規劃頁面清單，並寫回 `.devin/wiki.json`。
+
+- **只在真的有變時才花錢。** 結構簽章沒變就不呼叫 API，大部分功能 PR 都屬於這種。
+- **跟著你的 PR 一起合併。** 更新會 commit 到 PR 的來源 branch，預設不會另開 PR。
+- **保留你手寫的內容。** `repo_notes` 和用 `page_notes` 釘選的頁面會原樣保留。
+- **寫入前先檢查。** 每份規劃都會依 DeepWiki 文件記載的限制檢查；連續兩次不合格就不寫入任何檔案。
+- **支援 release 流程。** develop → main 的流程下，更新會跟著 release PR 一起進 main。
+
+> 這是獨立的開源專案，與 Cognition、Devin、DeepWiki 沒有隸屬或背書關係。
 
 ## 運作流程
 
@@ -34,7 +48,7 @@ PR 開往目標 branch ──► 結構有變嗎？──沒有──► 結束�
 
 | 項目 | 怎麼確認 |
 |---|---|
-| repo 能使用這個 Action | 這個 Action 的 repo 若是 private，只有**同一個擁有者**（同一個使用者或組織）底下的 repo 能使用（見「疑難排解」第一列）。 |
+| repo 能使用這個 Action | 這個 Action 的 repo 是公開的話，任何 repo 都能用。如果你用的是 private 的複本，只有**同一個擁有者**（同一個使用者或組織）底下的 repo 能使用（見「疑難排解」第一列）。 |
 | 你對該 repo 有 **Admin** 權限 | 打開 repo 頁面，上方分頁列最右邊要看得到 **⚙ Settings**。看不到就是權限不足，請 repo 管理者幫你加，或請他操作步驟 1。 |
 | 有一把 Anthropic API key | 見步驟 0。 |
 | 知道目標 branch | 也就是 PR 要合併進去的 branch，通常是 `main`，也可能是 `master`。到 repo 首頁左上角的 branch 下拉選單查看。<br>**功能先進 develop、再用 release PR 把 develop 合併進 main 的流程，目標 branch 填 `main`**：Action 會在 release PR 上執行，更新會 commit 到 develop，跟著 release 一起進 main。 |
@@ -45,8 +59,8 @@ PR 開往目標 branch ──► 結構有變嗎？──沒有──► 結束�
 
 API key 是 Action 呼叫 Claude 用的，費用會算在這把 key 所屬的 Anthropic 帳戶。
 
-1. 先問團隊內負責 Anthropic 帳戶的人，是否已有給 CI 用的 key；有的話直接用，跳到步驟 1。
-2. 要自己建立的話，用瀏覽器登入 [Claude Console](https://console.anthropic.com/)。
+1. 如果已經有專門給 CI 用的 key，可以直接使用，跳到步驟 1。
+2. 沒有的話，用瀏覽器登入 [Claude Console](https://console.anthropic.com/)。
 3. 進入 **API keys** 頁面，按 **Create Key**。
 4. 名稱填好認的名字，例如 `github-deepwiki-sync`，按建立。
 5. **立刻複製 key**（以 `sk-ant-` 開頭）。這個畫面關掉後就看不到完整的 key 了。
@@ -88,7 +102,7 @@ workflow 檔告訴 GitHub「什麼時候、跑哪個 Action」。它必須放在
 **先準備好檔案內容**（把 `main` 改成你的目標 branch，可列多個，例如 `[main, release]`）：
 
 ```yaml
-name: DeepWiki wiki.json sync
+name: DeepWiki Page Planner
 
 on:
   pull_request:
@@ -113,6 +127,7 @@ jobs:
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           # language: 繁體中文      ← 想要中文頁面標題就拿掉開頭的 #
+          # max-pages: "30"       ← 頁數上限，預設 30；DeepWiki enterprise 方案最多 80
 ```
 
 同一份檔案也在 [`examples/deepwiki-wiki-sync.yml`](examples/deepwiki-wiki-sync.yml)。
@@ -135,7 +150,7 @@ jobs:
 4. 把上面的內容貼進編輯區。
 5. 按右上角綠色的 **Commit changes...**。
 6. 在跳出的視窗：
-   - **Commit message** 可填 `ci: add DeepWiki wiki.json sync`；
+   - **Commit message** 可填 `ci: add DeepWiki Page Planner`；
    - 選 **Create a new branch for this commit and start a pull request**（branch 有保護時只能選這個，也比較好檢查）；
    - 按 **Propose changes**。
 7. 進到「Open a pull request」頁面後，確認 base branch，按 **Create pull request**。
@@ -149,7 +164,7 @@ git checkout -b ci/deepwiki-wiki-sync
 mkdir -p .github/workflows
 # 把上面的內容存成 .github/workflows/deepwiki-wiki-sync.yml
 git add .github/workflows/deepwiki-wiki-sync.yml
-git commit -m "ci: add DeepWiki wiki.json sync"
+git commit -m "ci: add DeepWiki Page Planner"
 git push -u origin ci/deepwiki-wiki-sync
 gh pr create --base main --fill       # develop → main 的流程改成 --base develop
 ```
@@ -165,7 +180,7 @@ gh pr create --base main --fill       # develop → main 的流程改成 --base 
 
 repo 原本沒有 `.devin/wiki.json` 的話，第一次執行會產生第一版。
 
-1. 在 PR 頁面最下方的檢查區塊，會看到 **DeepWiki wiki.json sync / sync (pull_request)** 正在跑（黃色圓點）。一般 1～3 分鐘完成。
+1. 在 PR 頁面最下方的檢查區塊，會看到 **DeepWiki Page Planner / sync (pull_request)** 正在跑（黃色圓點）。一般 1～3 分鐘完成。
 2. 想看過程就按它右邊的 **Details**，展開 **Run GlennCheng/deepwiki-action@v1** 底下的步驟。成功時會看到類似：
 
    ```
@@ -196,7 +211,7 @@ DeepWiki 是在**產生 wiki 時**讀取 `.devin/wiki.json`。官方文件的說
 2. 打開這個 repo 的 wiki 頁面，執行重新產生。
 3. 產生完成後，wiki 的頁面清單應該和 `.devin/wiki.json` 一致。
 
-> 官方文件沒有寫重新產生按鈕的確切位置。找不到的話，請問負責 Devin 帳戶的人。
+> 官方文件沒有寫重新產生按鈕的確切位置。找不到的話，請查閱 DeepWiki 的文件，或詢問你們 Devin 工作區的管理員。
 
 ---
 
@@ -293,7 +308,7 @@ DeepWiki 是在**產生 wiki 時**讀取 `.devin/wiki.json`。官方文件的說
 
 **別釘太多：** 釘選頁越多，Claude 能規劃的頁數越少。釘滿上限時，新模組就沒有位置，規劃會被退回，job 會失敗。建議只釘真正需要特定寫法的頁面。
 
-**查看哪些頁被釘選：** 在本機跑以下指令（需先完成下方「維護這個 Action」的安裝）：
+**查看哪些頁被釘選：** 在本機跑以下指令（需先完成下方「開發」的安裝）：
 
 ```bash
 python3 -c "import json,sys; sys.path.insert(0,'src'); import wiki_sync as w; \
@@ -370,7 +385,7 @@ on:
 - 合併進目標 branch 後會再執行一次。結構簽章相符就結束，不呼叫 API；仍然過期才重新規劃並開補更新 PR。
 - 補更新 PR 使用固定的 branch（預設 `deepwiki-wiki-sync/<目標 branch>`，可用 `sync-branch` 參數改）。同時只會有一個開著的補更新 PR，之後的更新會疊加在同一個 PR 上，不會重複開。
 - 補更新 PR 本身不會觸發 Action，合併後那次執行的簽章已相符，所以不會形成迴圈。
-- 也可以手動執行：**Actions → DeepWiki wiki.json sync → Run workflow**，選擇 branch。過期時會開補更新 PR。
+- 也可以手動執行：**Actions → DeepWiki Page Planner → Run workflow**，選擇 branch。過期時會開補更新 PR。
 
 ---
 
@@ -382,7 +397,7 @@ on:
 |---|---|---|
 | `anthropic-api-key` | （必填） | Anthropic API key |
 | `language` | `English` | 頁面標題與 purpose 的語言，例如 `繁體中文` |
-| `max-pages` | `30` | 頁數上限；DeepWiki enterprise 方案可設 `80` |
+| `max-pages` | `30` | 頁數上限（含釘選頁）。可以設得比 30 小，讓 wiki 更精簡；DeepWiki 一般方案最多 30，enterprise 方案最多 `80` |
 | `depth` | `3` | 多深的目錄變動算結構變更 |
 | `extra-context` | 空 | 額外給 Claude 參考的檔案，glob 以逗號分隔，例如 `docs/*.md,src/*/index.ts` |
 | `model` | `claude-opus-5-5` | Claude 模型 |
@@ -429,7 +444,7 @@ GitHub 為了避免無限迴圈，用預設 `GITHUB_TOKEN` 推的 commit 和開�
 
 ## 費用與資料
 
-- **只有結構變更才會呼叫 API。** 一般功能開發的 PR 不會花錢。
+- **只有結構變更才會呼叫 API。** 一般功能開發的 PR 不會呼叫 API。每次執行仍會用到少量 GitHub Actions 時間（checkout 和檢查本身）。
 - 每次呼叫送出的內容：git 追蹤中的檔案路徑（最多 3,000 條）、目錄清單、最多 40 個關鍵檔的內容（每個最多 8,000 字）、現有的 wiki.json。**不會送出一般原始碼檔案的內容**，除非你用 `extra-context` 指定。
 - 單次費用依 repo 大小而定。小型 repo 粗估約數美分，大型 repo 也通常在 1 美元以內（以 Claude Opus 5.5 定價估算，未實測）。
 - 寫檔前會依 DeepWiki 的限制檢查格式：至少 1 頁、最多 `max-pages` 頁、標題不可空白或重複、parent 必須存在且不能循環、notes 總數不超過 100、每則不超過 10,000 字。
@@ -440,7 +455,9 @@ GitHub 為了避免無限迴圈，用預設 `GITHUB_TOKEN` 推的 commit 和開�
 
 ---
 
-## 維護這個 Action
+## 開發
+
+這是一個 composite action：`action.yml` 串起各個步驟，`src/wiki_sync.py` 負責規劃與檢查，`scripts/` 是 git 相關的步驟。要修改的話：
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install anthropic==1.14.0 pytest
@@ -455,3 +472,7 @@ ANTHROPIC_API_KEY=... .venv/bin/python src/wiki_sync.py generate --repo /path/to
 **發新版本：** 打 `v1.x.y` tag，再把 `v1` 移到同一個 commit。有不相容的變更時改用 `v2`。
 
 **修改 prompt 或輸出規則時**，請調高 `src/wiki_sync.py` 的 `GENERATOR_VERSION`，讓所有 repo 下次都重新規劃。
+
+## 授權
+
+[MIT](LICENSE)
